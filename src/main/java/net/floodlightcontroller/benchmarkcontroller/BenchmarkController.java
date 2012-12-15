@@ -2,8 +2,10 @@ package net.floodlightcontroller.benchmarkcontroller;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 import org.openflow.protocol.OFBarrierReply;
 import org.openflow.protocol.OFBarrierRequest;
@@ -12,6 +14,7 @@ import org.openflow.protocol.OFHello;
 import org.openflow.protocol.OFMatch;
 import org.openflow.protocol.OFMessage;
 import org.openflow.protocol.OFPacketIn;
+import org.openflow.protocol.OFPhysicalPort;
 import org.openflow.protocol.OFType;
 import org.openflow.protocol.action.OFAction;
 import org.openflow.protocol.action.OFActionOutput;
@@ -19,6 +22,7 @@ import org.openflow.protocol.action.OFActionOutput;
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IOFMessageListener;
 import net.floodlightcontroller.core.IOFSwitch;
+import net.floodlightcontroller.core.IOFSwitchListener;
 import net.floodlightcontroller.core.module.FloodlightModuleContext;
 import net.floodlightcontroller.core.module.FloodlightModuleException;
 import net.floodlightcontroller.core.module.IFloodlightModule;
@@ -36,12 +40,16 @@ import org.openflow.util.HexString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class BenchmarkController implements IOFMessageListener, IFloodlightModule {
+public class BenchmarkController implements IOFSwitchListener, IOFMessageListener, IFloodlightModule {
 
 	protected IFloodlightProviderService floodlightProvider;
 	protected Set macAddresses;
 	protected static Logger logger;
 	protected IStaticFlowEntryPusherService staticFlowEntryPusher;
+	protected int flowCount = 0;
+	protected Random ran = new Random();
+	protected boolean stop = false;
+	protected final int TOTAL_FLOWS = 500;
 
 	@Override
 	public String getName() {
@@ -95,11 +103,54 @@ public class BenchmarkController implements IOFMessageListener, IFloodlightModul
 	@Override
 	public void startUp(FloodlightModuleContext context) {
 		// TODO Auto-generated method stub
-		floodlightProvider.addOFMessageListener(OFType.PACKET_IN, this);	
-		floodlightProvider.addOFMessageListener(OFType.BARRIER_REPLY, this);	
+		floodlightProvider.addOFMessageListener(OFType.BARRIER_REPLY, this);
+		floodlightProvider.addOFSwitchListener(this);
 	}
 
-	boolean triggered = false;
+	private void sendBarrier(IOFSwitch sw, FloodlightContext cntx) {
+		try {
+			OFMessage m = new OFBarrierRequest();
+			sw.write(m, cntx);
+			logger.info("sending another barrier request " + m.getXid());
+			logger.info("--------------------------------------------");
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
+	private void pushFlow(String dp) {
+		//generate a random flow
+		String srcIp = IPv4.fromIPv4Address(flowCount);
+		String dstIp = IPv4.fromIPv4Address(flowCount * 2);
+		ArrayList<OFAction> actionsTo = new ArrayList<OFAction>();
+		OFFlowMod flowMod = new OFFlowMod();
+		flowMod.setType(OFType.FLOW_MOD);
+		OFAction outputTo = new OFActionOutput((short) ran.nextInt(30));
+		actionsTo.add(outputTo);
+		OFMatch match = new OFMatch();
+		match.setNetworkDestination(IPv4.toIPv4Address(dstIp));
+		match.setNetworkSource(IPv4.toIPv4Address(srcIp));
+		match.setDataLayerType(Ethernet.TYPE_IPv4);
+		flowMod.setActions(actionsTo);
+		flowMod.setMatch(match);
+		flowMod.setHardTimeout((short)20);
+		logger.info("pushing the flow:" + ("Flow#" + flowCount
+				+ " srcIp:" + match.getNetworkSource()
+				+ " srcPort:" + match.getTransportSource()
+				+ " dstIp:" + match.getNetworkDestination()
+				+ " dstPort:" + match.getTransportDestination()));
+		staticFlowEntryPusher.addFlow(("Flow#" + flowCount), flowMod, dp);
+		flowCount ++;
+		if(flowCount == TOTAL_FLOWS)
+			stop = true;
+	}
+
+	private void pushMutipleFlows(int n, String dp) {
+		for(int i = 0;i<n;i++) {
+			pushFlow(dp);
+		}
+	}
+
 	@Override
 	public net.floodlightcontroller.core.IListener.Command receive(
 			IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
@@ -107,55 +158,13 @@ public class BenchmarkController implements IOFMessageListener, IFloodlightModul
 		logger.info("this message is from:" + sw.getId());
 
 		switch (msg.getType()) {
-		case PACKET_IN:
-			if (!triggered) {
-				String dp = "00:00:00:00:00:00:00:01";
-				OFPacketIn pi = (OFPacketIn) msg;
-				OFMatch match = new OFMatch();
-				match.loadFromPacket(pi.getPacketData(), (short) 0);
-				System.out.println(match);
-				System.out.println(IPv4.fromIPv4Address(match.getNetworkDestination()));
-				//IPv4-To
-				List actionsTo = new ArrayList();
-				// Declare the flow
-				OFFlowMod fmTo = new OFFlowMod();
-				fmTo.setType(OFType.FLOW_MOD);
-				// Declare the action
-				OFAction outputTo = new OFActionOutput((short) 2);
-				actionsTo.add(outputTo);
-				// Declare the match
-				OFMatch mTo = new OFMatch();
-				mTo.setNetworkDestination(IPv4.toIPv4Address("10.0.0.3"));
-				mTo.setDataLayerType(Ethernet.TYPE_IPv4);
-				fmTo.setActions(actionsTo);
-				fmTo.setMatch(mTo);
-				// Push the flow
-				staticFlowEntryPusher.addFlow("FlowTo", fmTo, dp);
-				logger.info("pushing the flow");
-				System.out.println(mTo);
-
-				try {
-					OFMessage m = new OFBarrierRequest();
-					sw.write(m, cntx);
-					logger.info("send the first barrier request " + m.getXid());
-				} catch (IOException e) {
-					e.printStackTrace();
-				}
-				triggered = true;
-			}
-			break;
-
 		case BARRIER_REPLY:
-			OFBarrierReply br = (OFBarrierReply)msg;
-			System.out.println(br.getType() + " " + br.getXid());
-			logger.info("received barrier reply " + br.getXid());
-			
-			try {
-				OFMessage m = new OFBarrierRequest();
-				sw.write(m, cntx);
-				logger.info("sending another barrier request " + m.getXid());
-			} catch (IOException e) {
-				e.printStackTrace();
+			if(!stop) {
+				OFBarrierReply br = (OFBarrierReply)msg;
+				logger.info("received barrier reply " + br.getXid());
+				//pushFlow(HexString.toHexString(sw.getId()));
+				pushMutipleFlows(100, HexString.toHexString(sw.getId()));
+				sendBarrier(sw, cntx);
 			}
 			break;
 
@@ -164,5 +173,28 @@ public class BenchmarkController implements IOFMessageListener, IFloodlightModul
 
 		};
 		return Command.CONTINUE;
+	}
+
+	@Override
+	public void addedSwitch(IOFSwitch sw) {
+		logger.info("added a new switch:" + sw.getId()
+				+ " with "
+				+ sw.getPorts().size()
+				+ " ports total, and "
+				+ sw.getEnabledPorts().size()
+				+ " enabled ports");
+
+		//pushFlow(HexString.toHexString(sw.getId()));
+		sendBarrier(sw, null);
+	}
+
+	@Override
+	public void removedSwitch(IOFSwitch sw) {
+		// TODO Auto-generated method stub
+	}
+
+	@Override
+	public void switchPortChanged(Long switchId) {
+		// TODO Auto-generated method stub
 	}
 }
