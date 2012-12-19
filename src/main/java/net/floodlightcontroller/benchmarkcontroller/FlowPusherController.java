@@ -1,20 +1,19 @@
 package net.floodlightcontroller.benchmarkcontroller;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
 import org.openflow.protocol.OFBarrierReply;
 import org.openflow.protocol.OFBarrierRequest;
 import org.openflow.protocol.OFFlowMod;
-import org.openflow.protocol.OFHello;
 import org.openflow.protocol.OFMatch;
 import org.openflow.protocol.OFMessage;
-import org.openflow.protocol.OFPacketIn;
-import org.openflow.protocol.OFPhysicalPort;
 import org.openflow.protocol.OFType;
 import org.openflow.protocol.action.OFAction;
 import org.openflow.protocol.action.OFActionOutput;
@@ -30,8 +29,6 @@ import net.floodlightcontroller.core.module.IFloodlightService;
 
 import net.floodlightcontroller.core.IFloodlightProviderService;
 import java.util.ArrayList;
-import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.Set;
 import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.IPv4;
 import net.floodlightcontroller.staticflowentry.IStaticFlowEntryPusherService;
@@ -40,21 +37,23 @@ import org.openflow.util.HexString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class BenchmarkController implements IOFSwitchListener, IOFMessageListener, IFloodlightModule {
+public class FlowPusherController implements IOFSwitchListener, IOFMessageListener, IFloodlightModule {
 
 	protected IFloodlightProviderService floodlightProvider;
-	protected Set macAddresses;
 	protected static Logger logger;
 	protected IStaticFlowEntryPusherService staticFlowEntryPusher;
 	protected int flowCount = 0;
 	protected Random ran = new Random();
 	protected boolean stop = false;
 	protected final int TOTAL_FLOWS = 500;
+	
+	Object lock = new Object();
+	double lastTime;
 
 	@Override
 	public String getName() {
 		// TODO Auto-generated method stub
-		return "BenchmarkTracker";
+		return "FlowPusherController";
 	}
 
 	@Override
@@ -95,9 +94,14 @@ public class BenchmarkController implements IOFSwitchListener, IOFMessageListene
 			throws FloodlightModuleException {
 		// TODO Auto-generated method stub
 		floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
-		macAddresses = new ConcurrentSkipListSet<Long>();
-		logger = LoggerFactory.getLogger(BenchmarkController.class);
+		logger = LoggerFactory.getLogger(FlowPusherController.class);
 		staticFlowEntryPusher = context.getServiceImpl(IStaticFlowEntryPusherService.class);
+		try {
+			PrintStream err = new PrintStream(new FileOutputStream(new File("/home/chen/times.dat")));
+			System.setErr(err);
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
 	}
 
 	@Override
@@ -133,7 +137,7 @@ public class BenchmarkController implements IOFSwitchListener, IOFMessageListene
 		match.setDataLayerType(Ethernet.TYPE_IPv4);
 		flowMod.setActions(actionsTo);
 		flowMod.setMatch(match);
-		flowMod.setHardTimeout((short)20);
+		//flowMod.setHardTimeout((short)20);
 		logger.info("pushing the flow:" + ("Flow#" + flowCount
 				+ " srcIp:" + match.getNetworkSource()
 				+ " srcPort:" + match.getTransportSource()
@@ -141,13 +145,17 @@ public class BenchmarkController implements IOFSwitchListener, IOFMessageListene
 				+ " dstPort:" + match.getTransportDestination()));
 		staticFlowEntryPusher.addFlow(("Flow#" + flowCount), flowMod, dp);
 		flowCount ++;
-		if(flowCount == TOTAL_FLOWS)
+		if(flowCount == TOTAL_FLOWS) {
 			stop = true;
+		}
 	}
 
 	private void pushMutipleFlows(int n, String dp) {
 		for(int i = 0;i<n;i++) {
+			//lastTime = (double)System.nanoTime()/1000000.0;	
 			pushFlow(dp);
+			//double time = (double)System.nanoTime()/1000000.0;
+			//System.err.println(time - lastTime);
 		}
 	}
 
@@ -159,12 +167,17 @@ public class BenchmarkController implements IOFSwitchListener, IOFMessageListene
 
 		switch (msg.getType()) {
 		case BARRIER_REPLY:
-			if(!stop) {
-				OFBarrierReply br = (OFBarrierReply)msg;
-				logger.info("received barrier reply " + br.getXid());
-				//pushFlow(HexString.toHexString(sw.getId()));
-				pushMutipleFlows(100, HexString.toHexString(sw.getId()));
-				sendBarrier(sw, cntx);
+			synchronized(lock) {
+				if(!stop) {
+					OFBarrierReply br = (OFBarrierReply)msg;
+					logger.info("received barrier reply " + br.getXid());
+					double time = (double)System.nanoTime()/1000000.0;
+					System.err.println(time - lastTime);
+					lastTime = (double)System.nanoTime()/1000000.0;					
+					pushFlow(HexString.toHexString(sw.getId()));
+					//pushMutipleFlows(TOTAL_FLOWS, HexString.toHexString(sw.getId()));
+					sendBarrier(sw, cntx);
+				}
 			}
 			break;
 
