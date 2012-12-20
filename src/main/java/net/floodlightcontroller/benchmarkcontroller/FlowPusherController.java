@@ -1,8 +1,10 @@
 package net.floodlightcontroller.benchmarkcontroller;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Collection;
@@ -45,10 +47,13 @@ public class FlowPusherController implements IOFSwitchListener, IOFMessageListen
 	protected int flowCount = 0;
 	protected Random ran = new Random();
 	protected boolean stop = false;
-	protected final int TOTAL_FLOWS = 500;
+	protected final int TOTAL_FLOWS = 1500;
 	
 	Object lock = new Object();
 	double lastTime;
+	
+	protected BufferedWriter createRecorder;
+	protected String outPathCreate = "/home/chen/FloodlightRecords/createFlow.dat";
 
 	@Override
 	public String getName() {
@@ -96,10 +101,9 @@ public class FlowPusherController implements IOFSwitchListener, IOFMessageListen
 		floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
 		logger = LoggerFactory.getLogger(FlowPusherController.class);
 		staticFlowEntryPusher = context.getServiceImpl(IStaticFlowEntryPusherService.class);
-		try {
-			PrintStream err = new PrintStream(new FileOutputStream(new File("/home/chen/times.dat")));
-			System.setErr(err);
-		} catch (FileNotFoundException e) {
+        try {
+        	createRecorder = new BufferedWriter(new FileWriter(outPathCreate));
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
@@ -147,6 +151,11 @@ public class FlowPusherController implements IOFSwitchListener, IOFMessageListen
 		flowCount ++;
 		if(flowCount == TOTAL_FLOWS) {
 			stop = true;
+			try {
+				createRecorder.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
 	}
 
@@ -172,7 +181,11 @@ public class FlowPusherController implements IOFSwitchListener, IOFMessageListen
 					OFBarrierReply br = (OFBarrierReply)msg;
 					logger.info("received barrier reply " + br.getXid());
 					double time = (double)System.nanoTime()/1000000.0;
-					System.err.println(time - lastTime);
+					try {
+						createRecorder.write((time - lastTime)+"\n");
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
 					lastTime = (double)System.nanoTime()/1000000.0;					
 					pushFlow(HexString.toHexString(sw.getId()));
 					//pushMutipleFlows(TOTAL_FLOWS, HexString.toHexString(sw.getId()));

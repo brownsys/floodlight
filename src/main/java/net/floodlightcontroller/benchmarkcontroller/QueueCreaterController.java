@@ -1,10 +1,8 @@
 package net.floodlightcontroller.benchmarkcontroller;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -26,7 +24,6 @@ import org.openflow.util.U16;
 import org.openflow.vendor.openflow.OFOpenFlowVendorData;
 import org.openflow.vendor.openflow.OFQueueDeleteVendorData;
 import org.openflow.vendor.openflow.OFQueueModifyVendorData;
-import org.python.modules.synchronize;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,10 +47,15 @@ public class QueueCreaterController implements IOFSwitchListener, IOFMessageList
     protected final int PORT_OFFSET = 1;
     protected final int PORT_MAX = 50;
     protected Boolean cleaned = false;
+    protected int currentDeleting = 0;
     
-    boolean ON_ALL_PORT = false;
+    protected boolean ON_ALL_PORT = false;
     
-    double lastTime;
+    protected double lastTime;
+    protected BufferedWriter createRecorder;
+    protected BufferedWriter deleteRecorder;
+    protected String outPathCreate = "/home/chen/FloodlightRecords/createQueue.dat";
+    protected String outPathDelete = "/home/chen/FloodlightRecords/deleteQueue.dat";
     
 	@Override
 	public boolean isCallbackOrderingPrereq(OFType type, String name) {
@@ -95,10 +97,10 @@ public class QueueCreaterController implements IOFSwitchListener, IOFMessageList
         floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
         logger = LoggerFactory.getLogger(QueueCreaterController.class);
         currentQueueNum = 0;
-		try {
-			PrintStream err = new PrintStream(new FileOutputStream(new File("/home/chen/times2.dat")));
-			System.setErr(err);
-		} catch (FileNotFoundException e) {
+        try {
+        	createRecorder = new BufferedWriter(new FileWriter(outPathCreate));
+        	deleteRecorder = new BufferedWriter(new FileWriter(outPathDelete));
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
@@ -161,32 +163,61 @@ public class QueueCreaterController implements IOFSwitchListener, IOFMessageList
             break;
         case BARRIER_REPLY:
         	if(currentQueueNum == TOTAL_QUEUE) {
-        		synchronized(cleaned) {
-        			if (cleaned == false) {
-        				//stop benchmarking, delete all queues
-        				System.out.println("Wait some time before cleaning up...");
-        				//getAllQueueConfigs(sw);
-        				try {
-        					Thread.sleep(10000);
-        				} catch (InterruptedException e) {
-        					e.printStackTrace();
-        				}
-        				System.out.println("Finished, cleaning up...");
-        				int port;
-        				int queue;
-        				for (int i = 0;i < currentQueueNum;i++) {
-        					port = nextPort(i);
-        					queue = nextQueue(i);
-        					System.out.println("Deleting queue " + queue + " on port " + port + "...");
-        					deleteQueue(sw, (short) port, queue);
-        				}
-        				cleaned = true;
-        			}
-        		}
+//        		synchronized(cleaned) {
+//        			if (cleaned == false) {
+//        				//stop benchmarking, delete all queues
+//        				System.out.println("Wait some time before cleaning up...");
+//        				//getAllQueueConfigs(sw);
+//        				try {
+//        					Thread.sleep(10000);
+//        				} catch (InterruptedException e) {
+//        					e.printStackTrace();
+//        				}
+//        				System.out.println("Finished, cleaning up...");
+//        				int port;
+//        				int queue;
+//        				for (int i = 0;i < currentQueueNum;i++) {
+//        					port = nextPort(i);
+//        					queue = nextQueue(i);
+//        					System.out.println("Deleting queue " + queue + " on port " + port + "...");
+//        					deleteQueue(sw, (short) port, queue);
+//        				}
+//        				cleaned = true;
+//        			}
+//        		}
+            	System.out.println("Received Barrier Reply");
+				double time = (double)System.nanoTime()/1000000.0;
+				try {
+					deleteRecorder.write((time - lastTime)+"\n");
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				System.err.println(time - lastTime);
+            	int nextPort = nextPort(currentDeleting);
+            	int nextQueue = nextQueue(currentDeleting);
+            	lastTime = (double)System.nanoTime()/1000000.0;
+            	System.err.println(nextPort + " " + nextQueue);
+            	deleteQueue(sw, (short) nextPort, nextQueue);
+            	currentDeleting ++;
+            	if (currentDeleting < currentQueueNum) {
+            		sendBarrier(sw);
+            	} else {
+            		System.out.println("all cleaned...");
+            		try {
+						deleteRecorder.close();
+						createRecorder.close();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+            	}
         	} else {
             	System.out.println("Received Barrier Reply");
 				double time = (double)System.nanoTime()/1000000.0;
-				System.err.println(time - lastTime);
+				try {
+					createRecorder.write((time - lastTime)+"\n");
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
             	int nextPort = nextPort(currentQueueNum);
             	int nextQueue = nextQueue(currentQueueNum);
             	lastTime = (double)System.nanoTime()/1000000.0;	
