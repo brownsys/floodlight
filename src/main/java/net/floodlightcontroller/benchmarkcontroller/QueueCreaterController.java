@@ -54,8 +54,8 @@ public class QueueCreaterController implements IOFSwitchListener, IOFMessageList
     protected double lastTime;
     protected BufferedWriter createRecorder;
     protected BufferedWriter deleteRecorder;
-    protected String outPathCreate = "/home/chen/FloodlightRecords/createQueue.dat";
-    protected String outPathDelete = "/home/chen/FloodlightRecords/deleteQueue.dat";
+    protected String outPathCreate = "/tmp/createQueue.dat";
+    protected String outPathDelete = "/tmp/deleteQueue.dat";
     
 	@Override
 	public boolean isCallbackOrderingPrereq(OFType type, String name) {

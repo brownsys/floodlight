@@ -53,7 +53,7 @@ public class FlowPusherController implements IOFSwitchListener, IOFMessageListen
 	double lastTime;
 	
 	protected BufferedWriter createRecorder;
-	protected String outPathCreate = "/home/chen/FloodlightRecords/createFlow.dat";
+	protected String outPathCreate = "/tmp/createFlow.dat";
 
 	@Override
 	public String getName() {
